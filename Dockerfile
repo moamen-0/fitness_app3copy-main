@@ -17,7 +17,6 @@ WORKDIR /app
 
 # Copy requirements file first
 COPY requirements_cloud.txt ./requirements.txt
-RUN pip install -r requirements.txt
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt

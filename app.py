@@ -664,40 +664,40 @@ def process_frame(frame, exercise_id, session_data):
             'frame': ''
         }
 
-@socketio.on('process_frame')
-def handle_process_frame(data):
-    """
-    WebSocket handler for processing frames in real-time.
-    Accepts base64-encoded image frames and returns processing results.
-    """
-    try:
-        # Extract exercise type and image data
-        exercise_type = data.get('exercise_type', 'hummer')
-        img_data = data.get('image')
+# @socketio.on('process_frame')
+# def handle_process_frame(data):
+#     """
+#     WebSocket handler for processing frames in real-time.
+#     Accepts base64-encoded image frames and returns processing results.
+#     """
+#     try:
+#         # Extract exercise type and image data
+#         exercise_type = data.get('exercise_type', 'hummer')
+#         img_data = data.get('image')
         
-        if not img_data:
-            emit('process_result', {"error": "No image data provided"})
-            return
+#         if not img_data:
+#             emit('process_result', {"error": "No image data provided"})
+#             return
             
-        # Decode base64 image
-        img_bytes = base64.b64decode(img_data.split(',')[1] if ',' in img_data else img_data)
-        nparr = np.frombuffer(img_bytes, np.uint8)
-        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+#         # Decode base64 image
+#         img_bytes = base64.b64decode(img_data.split(',')[1] if ',' in img_data else img_data)
+#         nparr = np.frombuffer(img_bytes, np.uint8)
+#         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
-        if frame is None or frame.size == 0:
-            emit('process_result', {"error": "Invalid image format"})
-            return
+#         if frame is None or frame.size == 0:
+#             emit('process_result', {"error": "Invalid image format"})
+#             return
         
-        # Process the frame
-        results = process_single_frame(frame, exercise_type)
+#         # Process the frame
+#         results = process_single_frame(frame, exercise_type)
         
-        # Send results back
-        emit('process_result', results)
+#         # Send results back
+#         emit('process_result', results)
         
-    except Exception as e:
-        app.logger.error(f"WebSocket error: {str(e)}")
-        app.logger.error(traceback.format_exc())
-        emit('process_result', {"error": str(e)})
+#     except Exception as e:
+#         app.logger.error(f"WebSocket error: {str(e)}")
+#         app.logger.error(traceback.format_exc())
+#         emit('process_result', {"error": str(e)})
 
 @app.route('/api/exercise/start/<exercise>', methods=['POST'])
 def start_exercise_api(exercise):
@@ -1070,6 +1070,66 @@ def draw_pose_landmarks(frame, results):
     
     return annotated_frame
 
+# @socketio.on('process_frame')
+# def handle_process_frame(data):
+#     """
+#     WebSocket handler for processing frames in real-time.
+#     Accepts base64-encoded image frames and returns processing results.
+#     """
+#     try:
+#         # Extract exercise type and image data
+#         exercise_type = data.get('exercise_type', 'hummer')
+#         img_data = data.get('image')
+        
+#         if not img_data:
+#             emit('process_result', {"error": "No image data provided"})
+#             return
+            
+#         # Decode base64 image
+#         img_bytes = base64.b64decode(img_data.split(',')[1] if ',' in img_data else img_data)
+#         nparr = np.frombuffer(img_bytes, np.uint8)
+#         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+#         if frame is None or frame.size == 0:
+#             emit('process_result', {"error": "Invalid image format"})
+#             return
+        
+#         # Process the frame
+#         results = process_single_frame(frame, exercise_type)
+        
+#         # Send results back
+#         emit('process_result', results)
+        
+#     except Exception as e:
+#         app.logger.error(f"WebSocket error: {str(e)}")
+#         app.logger.error(traceback.format_exc())
+#         emit('process_result', {"error": str(e)})
+
+# @socketio.on('process_frame')
+# def handle_process_frame(data):
+#     try:
+#         # Extract exercise type and image data
+#         exercise_type = data.get('exercise_type', 'hummer')
+#         img_data = data.get('image')
+        
+#         if not img_data:
+#             emit('process_result', {"error": "No image data provided"})
+#             return
+            
+#         # Decode base64 image
+#         img_bytes = base64.b64decode(img_data.split(',')[1] if ',' in img_data else img_data)
+#         nparr = np.frombuffer(img_bytes, np.uint8)
+#         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+#         # Process the frame
+#         results = process_single_frame(frame, exercise_type)
+        
+#         # Send results back
+#         emit('process_result', results)
+        
+#     except Exception as e:
+#         emit('process_result', {"error": str(e)})
+# Fixed WebSocket handler for processing frames
 @socketio.on('process_frame')
 def handle_process_frame(data):
     """
@@ -1085,50 +1145,44 @@ def handle_process_frame(data):
             emit('process_result', {"error": "No image data provided"})
             return
             
+        # Log receiving frame data
+        print(f"Received process_frame event for {exercise_type}, image size: {len(img_data) if img_data else 'none'}")
+        
         # Decode base64 image
-        img_bytes = base64.b64decode(img_data.split(',')[1] if ',' in img_data else img_data)
-        nparr = np.frombuffer(img_bytes, np.uint8)
-        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
-        if frame is None or frame.size == 0:
-            emit('process_result', {"error": "Invalid image format"})
-            return
-        
-        # Process the frame
-        results = process_single_frame(frame, exercise_type)
-        
-        # Send results back
-        emit('process_result', results)
-        
-    except Exception as e:
-        app.logger.error(f"WebSocket error: {str(e)}")
-        app.logger.error(traceback.format_exc())
-        emit('process_result', {"error": str(e)})
-
-@socketio.on('process_frame')
-def handle_process_frame(data):
-    try:
-        # Extract exercise type and image data
-        exercise_type = data.get('exercise_type', 'hummer')
-        img_data = data.get('image')
-        
-        if not img_data:
-            emit('process_result', {"error": "No image data provided"})
-            return
+        try:
+            # Handle both formats: with data URL prefix or without
+            if ',' in img_data:
+                img_bytes = base64.b64decode(img_data.split(',')[1])
+            else:
+                img_bytes = base64.b64decode(img_data)
+                
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
-        # Decode base64 image
-        img_bytes = base64.b64decode(img_data.split(',')[1] if ',' in img_data else img_data)
-        nparr = np.frombuffer(img_bytes, np.uint8)
-        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if frame is None or frame.size == 0:
+                emit('process_result', {"error": "Invalid image format or empty frame"})
+                return
+                
+            print(f"Successfully decoded image: {frame.shape}")
+        except Exception as decode_error:
+            print(f"Error decoding image: {str(decode_error)}")
+            emit('process_result', {"error": f"Error decoding image: {str(decode_error)}"})
+            return
         
         # Process the frame
         results = process_single_frame(frame, exercise_type)
         
         # Send results back
+        print(f"Sending process_result with data: {len(results.get('annotated_image', '')) if 'annotated_image' in results else 'no image'} bytes")
         emit('process_result', results)
         
     except Exception as e:
-        emit('process_result', {"error": str(e)})
+        error_message = str(e)
+        stack_trace = traceback.format_exc()
+        print(f"Error in process_frame handler: {error_message}")
+        print(stack_trace)
+        emit('process_result', {"error": error_message, "details": stack_trace})
+        
 @app.route('/api/exercise/stop/<session_id>', methods=['POST'])
 def stop_exercise_api(session_id):
     """
