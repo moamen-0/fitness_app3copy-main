@@ -639,7 +639,9 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import threading
 from flask_cors import CORS
-
+import base64
+import traceback
+import time
 # Import exercise modules
 from utils import calculate_angle, mp_pose, pose
 from exercises.bicep_curl import hummer
@@ -1386,6 +1388,334 @@ def process_frame_for_exercise(frame_data, exercise_id, session_data):
         print(f"Error in process_frame_for_exercise: {str(e)}")
         traceback.print_exc()
         return {'error': str(e)}
+
+@app.route('/api/process_frame', methods=['POST'])
+def process_frame():
+    """
+    Process a single image frame sent from a mobile device.
+    This endpoint allows the Flutter app to send camera frames for processing.
+    """
+    try:
+        # Get the exercise type from the request
+        exercise_type = request.form.get('exercise_type', 'hummer')
+        
+        # Validate exercise type
+        if exercise_type not in exercise_map:
+            return jsonify({"error": f"Invalid exercise type: {exercise_type}"}), 400
+            
+        # Get the image from the request
+        image_file = request.files.get('image')
+        if not image_file:
+            return jsonify({"error": "No image provided"}), 400
+            
+        # Convert to OpenCV format
+        nparr = np.frombuffer(image_file.read(), np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if frame is None or frame.size == 0:
+            return jsonify({"error": "Invalid image format"}), 400
+        
+        # Process the frame using the appropriate exercise function
+        results = process_single_frame(frame, exercise_type)
+        
+        return jsonify(results)
+    except Exception as e:
+        app.logger.error(f"Error processing frame: {str(e)}")
+        app.logger.error(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+def process_single_frame(frame, exercise_type):
+    """
+    Process a single video frame for pose detection and exercise tracking.
+    
+    Args:
+        frame: OpenCV image frame
+        exercise_type: Type of exercise to track (e.g., 'hummer', 'squat')
+        
+    Returns:
+        Dictionary with processed results including counters, feedback, and annotated image
+    """
+    # Initialize storage for exercise state if not already present
+    if not hasattr(process_single_frame, 'exercise_states'):
+        process_single_frame.exercise_states = {}
+    
+    # Get or create state for this exercise type
+    if exercise_type not in process_single_frame.exercise_states:
+        process_single_frame.exercise_states[exercise_type] = {
+            'left_counter': 0,
+            'right_counter': 0,
+            'left_state': None,
+            'right_state': None,
+            'last_feedback': '',
+            'last_time': time.time()
+        }
+    
+    # Access the state for this exercise
+    state = process_single_frame.exercise_states[exercise_type]
+    
+    # Convert to RGB for mediapipe
+    image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = pose.process(image)
+    
+    # Initialize response data
+    response_data = {
+        "left_counter": state['left_counter'],
+        "right_counter": state['right_counter'],
+        "feedback": state['last_feedback'],
+        "angles": {},
+        "landmarks": {}
+    }
+    
+    if results.pose_landmarks:
+        landmarks = results.pose_landmarks.landmark
+        
+        # Draw pose landmarks on frame
+        annotated_frame = draw_pose_landmarks(frame, results)
+        
+        # Extract key landmark coordinates for the specific exercise
+        arm_sides = {
+            'left': {
+                'shoulder': mp_pose.PoseLandmark.LEFT_SHOULDER,
+                'elbow': mp_pose.PoseLandmark.LEFT_ELBOW,
+                'wrist': mp_pose.PoseLandmark.LEFT_WRIST,
+                'hip': mp_pose.PoseLandmark.LEFT_HIP
+            },
+            'right': {
+                'shoulder': mp_pose.PoseLandmark.RIGHT_SHOULDER,
+                'elbow': mp_pose.PoseLandmark.RIGHT_ELBOW,
+                'wrist': mp_pose.PoseLandmark.RIGHT_WRIST,
+                'hip': mp_pose.PoseLandmark.RIGHT_HIP
+            }
+        }
+        
+        # Process based on exercise type
+        if exercise_type == 'hummer':
+            # Process bicep curl (hummer) exercise
+            for side, joints in arm_sides.items():
+                # Extract joint coordinates
+                shoulder = [
+                    landmarks[joints['shoulder'].value].x,
+                    landmarks[joints['shoulder'].value].y
+                ]
+                elbow = [
+                    landmarks[joints['elbow'].value].x,
+                    landmarks[joints['elbow'].value].y
+                ]
+                wrist = [
+                    landmarks[joints['wrist'].value].x,
+                    landmarks[joints['wrist'].value].y
+                ]
+                
+                # Calculate angles
+                elbow_angle = calculate_angle(shoulder, elbow, wrist)
+                
+                # Store angle in response
+                response_data["angles"][f"{side}_elbow"] = elbow_angle
+                
+                # Rep counting logic for bicep curl
+                if side == 'left':
+                    if elbow_angle > 160:
+                        state['left_state'] = 'down'
+                    if elbow_angle < 30 and state['left_state'] == 'down':
+                        state['left_state'] = 'up'
+                        state['left_counter'] += 1
+                        state['last_feedback'] = "Good form on left arm!"
+                if side == 'right':
+                    if elbow_angle > 160:
+                        state['right_state'] = 'down'
+                    if elbow_angle < 30 and state['right_state'] == 'down':
+                        state['right_state'] = 'up'
+                        state['right_counter'] += 1
+                        state['last_feedback'] = "Good form on right arm!"
+                
+                # Draw angle on the annotated frame
+                elbow_pixel = (
+                    int(elbow[0] * annotated_frame.shape[1]),
+                    int(elbow[1] * annotated_frame.shape[0])
+                )
+                cv2.putText(
+                    annotated_frame,
+                    f"{int(elbow_angle)}°",
+                    elbow_pixel,
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 255, 255),
+                    2,
+                    cv2.LINE_AA
+                )
+                
+        elif exercise_type == 'squat':
+            # Process squat exercise - simplified example
+            leg_sides = {
+                'left': {
+                    'hip': mp_pose.PoseLandmark.LEFT_HIP,
+                    'knee': mp_pose.PoseLandmark.LEFT_KNEE,
+                    'ankle': mp_pose.PoseLandmark.LEFT_ANKLE
+                },
+                'right': {
+                    'hip': mp_pose.PoseLandmark.RIGHT_HIP,
+                    'knee': mp_pose.PoseLandmark.RIGHT_KNEE,
+                    'ankle': mp_pose.PoseLandmark.RIGHT_ANKLE
+                }
+            }
+            
+            for side, joints in leg_sides.items():
+                hip = [
+                    landmarks[joints['hip'].value].x,
+                    landmarks[joints['hip'].value].y
+                ]
+                knee = [
+                    landmarks[joints['knee'].value].x,
+                    landmarks[joints['knee'].value].y
+                ]
+                ankle = [
+                    landmarks[joints['ankle'].value].x,
+                    landmarks[joints['ankle'].value].y
+                ]
+                
+                knee_angle = calculate_angle(hip, knee, ankle)
+                response_data["angles"][f"{side}_knee"] = knee_angle
+                
+                # Basic squat detection
+                if side == 'left' and knee_angle < 90:
+                    state['left_state'] = 'down'
+                elif side == 'left' and knee_angle > 160 and state['left_state'] == 'down':
+                    state['left_state'] = 'up'
+                    state['left_counter'] += 1
+                    state['last_feedback'] = "Good squat!"
+        
+        # Add more exercise types following the same pattern
+        # Each exercise would have its own angle calculations and rep counting logic
+        
+        # Store counters in response
+        response_data["left_counter"] = state['left_counter']
+        response_data["right_counter"] = state['right_counter']
+        response_data["feedback"] = state['last_feedback']
+        
+        # Convert landmarks to a serializable format
+        response_data["landmarks"] = {
+            str(i): {"x": landmark.x, "y": landmark.y, "z": landmark.z, "visibility": landmark.visibility}
+            for i, landmark in enumerate(landmarks)
+        }
+        
+        # Convert the annotated frame to base64 for response
+        ret, buffer = cv2.imencode('.jpg', annotated_frame)
+        img_str = base64.b64encode(buffer).decode('utf-8')
+        response_data["annotated_image"] = img_str
+    
+    return response_data
+
+def draw_pose_landmarks(frame, results):
+    """
+    Draw pose landmarks and connections on the frame.
+    
+    Args:
+        frame: Original image frame
+        results: MediaPipe pose detection results
+        
+    Returns:
+        Frame with landmarks and connections drawn
+    """
+    # Make a copy of the frame to avoid modifying the original
+    annotated_frame = frame.copy()
+    
+    # Draw pose landmarks
+    mp_drawing.draw_landmarks(
+        annotated_frame,
+        results.pose_landmarks,
+        mp_pose.POSE_CONNECTIONS,
+        mp_drawing.DrawingSpec(color=(245, 117, 66), thickness=2, circle_radius=4),
+        mp_drawing.DrawingSpec(color=(245, 66, 230), thickness=2, circle_radius=2)
+    )
+    
+    # Add counter text
+    if hasattr(process_single_frame, 'exercise_states'):
+        for exercise_type, state in process_single_frame.exercise_states.items():
+            cv2.putText(
+                annotated_frame,
+                f"Left: {state['left_counter']} | Right: {state['right_counter']}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA
+            )
+            
+            # Add feedback if available
+            if state['last_feedback']:
+                cv2.putText(
+                    annotated_frame,
+                    state['last_feedback'],
+                    (10, 70),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (255, 255, 255),
+                    2,
+                    cv2.LINE_AA
+                )
+    
+    return annotated_frame
+
+@socketio.on('process_frame')
+def handle_process_frame(data):
+    """
+    WebSocket handler for processing frames in real-time.
+    Accepts base64-encoded image frames and returns processing results.
+    """
+    try:
+        # Extract exercise type and image data
+        exercise_type = data.get('exercise_type', 'hummer')
+        img_data = data.get('image')
+        
+        if not img_data:
+            emit('process_result', {"error": "No image data provided"})
+            return
+            
+        # Decode base64 image
+        img_bytes = base64.b64decode(img_data.split(',')[1] if ',' in img_data else img_data)
+        nparr = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if frame is None or frame.size == 0:
+            emit('process_result', {"error": "Invalid image format"})
+            return
+        
+        # Process the frame
+        results = process_single_frame(frame, exercise_type)
+        
+        # Send results back
+        emit('process_result', results)
+        
+    except Exception as e:
+        app.logger.error(f"WebSocket error: {str(e)}")
+        app.logger.error(traceback.format_exc())
+        emit('process_result', {"error": str(e)})
+
+@socketio.on('process_frame')
+def handle_process_frame(data):
+    try:
+        # Extract exercise type and image data
+        exercise_type = data.get('exercise_type', 'hummer')
+        img_data = data.get('image')
+        
+        if not img_data:
+            emit('process_result', {"error": "No image data provided"})
+            return
+            
+        # Decode base64 image
+        img_bytes = base64.b64decode(img_data.split(',')[1] if ',' in img_data else img_data)
+        nparr = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        # Process the frame
+        results = process_single_frame(frame, exercise_type)
+        
+        # Send results back
+        emit('process_result', results)
+        
+    except Exception as e:
+        emit('process_result', {"error": str(e)})
 @app.route('/api/exercise/stop/<session_id>', methods=['POST'])
 def stop_exercise_api(session_id):
     """
