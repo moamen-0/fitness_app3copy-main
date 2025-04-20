@@ -1090,6 +1090,7 @@ def handle_frame(data):
         return
         
     try:
+        print(f"Received frame from {request.sid}, frame size: {len(data.get('frame', ''))} bytes")
         session_data = active_sessions[request.sid]
         exercise_id = session_data.get('exercise_id')
         
@@ -1098,7 +1099,12 @@ def handle_frame(data):
         if not frame_data:
             emit('error', {'message': 'No frame data received'})
             return
-            
+        emit('exercise_frame', {
+            'left_counter': result.get('left_counter', 0),
+            'right_counter': result.get('right_counter', 0),
+            'feedback': result.get('feedback', ''),
+            'frame': result.get('frame', '')  # Make sure this line is not commented out
+        })    
         # Convert base64 to numpy array
         import base64
         import numpy as np
@@ -1365,7 +1371,21 @@ def get_exercise_frames(session_id):
     except Exception as e:
         app.logger.error(f"Error getting exercise frames: {str(e)}")
         return jsonify({"error": str(e)}), 500
-
+def process_frame_for_exercise(frame_data, exercise_id, session_data):
+    try:
+        # Your existing code
+        
+        print(f"Processing frame for exercise {exercise_id}")
+        result = your_model_function(frame_data, exercise_id)
+        print(f"Model result: {result}")
+        
+        # Rest of code
+        
+        return result
+    except Exception as e:
+        print(f"Error in process_frame_for_exercise: {str(e)}")
+        traceback.print_exc()
+        return {'error': str(e)}
 @app.route('/api/exercise/stop/<session_id>', methods=['POST'])
 def stop_exercise_api(session_id):
     """
