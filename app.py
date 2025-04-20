@@ -209,75 +209,75 @@ def handle_disconnect():
             session_data['cap'].release()
         del active_sessions[request.sid]
 
-@socketio.on('start_exercise')
-def handle_start_exercise(data):
-    """
-    Start exercise tracking via WebSocket
-    """
-    try:
-        exercise_id = data.get('exercise_id')
-        print(f"Starting exercise: {exercise_id} for session {request.sid}")
+# @socketio.on('start_exercise')
+# def handle_start_exercise(data):
+#     """
+#     Start exercise tracking via WebSocket
+#     """
+#     try:
+#         exercise_id = data.get('exercise_id')
+#         print(f"Starting exercise: {exercise_id} for session {request.sid}")
         
-        if not exercise_id or exercise_id not in exercise_map:
-            emit('error', {'message': f'Invalid exercise: {exercise_id}'})
-            return
+#         if not exercise_id or exercise_id not in exercise_map:
+#             emit('error', {'message': f'Invalid exercise: {exercise_id}'})
+#             return
         
-        # Stop any currently active session
-        if request.sid in active_sessions:
-            session_data = active_sessions[request.sid]
-            if 'stop_event' in session_data:
-                session_data['stop_event'].set()
-            if 'cap' in session_data and session_data['cap'] is not None:
-                session_data['cap'].release()
+#         # Stop any currently active session
+#         if request.sid in active_sessions:
+#             session_data = active_sessions[request.sid]
+#             if 'stop_event' in session_data:
+#                 session_data['stop_event'].set()
+#             if 'cap' in session_data and session_data['cap'] is not None:
+#                 session_data['cap'].release()
         
-        # Create a stop event to allow safe termination
-        stop_event = threading.Event()
+#         # Create a stop event to allow safe termination
+#         stop_event = threading.Event()
         
-        # Store session data
-        active_sessions[request.sid] = {
-            'exercise_id': exercise_id,
-            'stop_event': stop_event,
-            'cap': None,
-            'left_counter': 0,
-            'right_counter': 0,
-            'start_time': time.time()
-        }
+#         # Store session data
+#         active_sessions[request.sid] = {
+#             'exercise_id': exercise_id,
+#             'stop_event': stop_event,
+#             'cap': None,
+#             'left_counter': 0,
+#             'right_counter': 0,
+#             'start_time': time.time()
+#         }
         
-        # Start a thread to process the exercise
-        exercise_thread = threading.Thread(
-            target=process_exercise_frames,
-            args=(request.sid, exercise_id, stop_event)
-        )
-        exercise_thread.daemon = True
-        exercise_thread.start()
+#         # Start a thread to process the exercise
+#         exercise_thread = threading.Thread(
+#             target=process_exercise_frames,
+#             args=(request.sid, exercise_id, stop_event)
+#         )
+#         exercise_thread.daemon = True
+#         exercise_thread.start()
         
-        emit('exercise_started', {'exercise_id': exercise_id})
+#         emit('exercise_started', {'exercise_id': exercise_id})
         
-    except Exception as e:
-        print(f"Error starting exercise: {str(e)}")
-        traceback.print_exc()
-        emit('error', {'message': f'Error starting exercise: {str(e)}'})
+#     except Exception as e:
+#         print(f"Error starting exercise: {str(e)}")
+#         traceback.print_exc()
+#         emit('error', {'message': f'Error starting exercise: {str(e)}'})
 
-@socketio.on('stop_exercise')
-def handle_stop_exercise():
-    """
-    Stop exercise tracking via WebSocket
-    """
-    try:
-        print(f"Stopping exercise for session {request.sid}")
+# @socketio.on('stop_exercise')
+# def handle_stop_exercise():
+#     """
+#     Stop exercise tracking via WebSocket
+#     """
+#     try:
+#         print(f"Stopping exercise for session {request.sid}")
         
-        if request.sid in active_sessions:
-            session_data = active_sessions[request.sid]
-            if 'stop_event' in session_data:
-                session_data['stop_event'].set()
-            if 'cap' in session_data and session_data['cap'] is not None:
-                session_data['cap'].release()
+#         if request.sid in active_sessions:
+#             session_data = active_sessions[request.sid]
+#             if 'stop_event' in session_data:
+#                 session_data['stop_event'].set()
+#             if 'cap' in session_data and session_data['cap'] is not None:
+#                 session_data['cap'].release()
             
-        emit('exercise_stopped')
+#         emit('exercise_stopped')
         
-    except Exception as e:
-        print(f"Error stopping exercise: {str(e)}")
-        emit('error', {'message': f'Error stopping exercise: {str(e)}'})
+#     except Exception as e:
+#         print(f"Error stopping exercise: {str(e)}")
+#         emit('error', {'message': f'Error stopping exercise: {str(e)}'})
 
 def process_exercise_frames(session_id, exercise_id, stop_event):
     """
@@ -468,49 +468,49 @@ def process_exercise_frames(session_id, exercise_id, stop_event):
             if 'cap' in session_data and session_data['cap'] is not None:
                 session_data['cap'].release()
 
-@socketio.on('send_frame')
-def handle_frame(data):
-    """
-    Process frames sent from client and return real-time feedback
-    """
-    if request.sid not in active_sessions:
-        emit('error', {'message': 'No active session'})
-        return
+# @socketio.on('send_frame')
+# def handle_frame(data):
+#     """
+#     Process frames sent from client and return real-time feedback
+#     """
+#     if request.sid not in active_sessions:
+#         emit('error', {'message': 'No active session'})
+#         return
         
-    try:
-        print(f"Received frame from {request.sid}, frame size: {len(data.get('frame', ''))} bytes")
-        session_data = active_sessions[request.sid]
-        exercise_id = session_data.get('exercise_id')
+#     try:
+#         print(f"Received frame from {request.sid}, frame size: {len(data.get('frame', ''))} bytes")
+#         session_data = active_sessions[request.sid]
+#         exercise_id = session_data.get('exercise_id')
         
-        # Decode base64 frame
-        frame_data = data.get('frame')
-        if not frame_data:
-            emit('error', {'message': 'No frame data received'})
-            return
+#         # Decode base64 frame
+#         frame_data = data.get('frame')
+#         if not frame_data:
+#             emit('error', {'message': 'No frame data received'})
+#             return
             
-        # Convert base64 to numpy array
-        import numpy as np
-        import cv2
+#         # Convert base64 to numpy array
+#         import numpy as np
+#         import cv2
         
-        imgdata = base64.b64decode(frame_data)
-        nparr = np.frombuffer(imgdata, np.uint8)
-        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+#         imgdata = base64.b64decode(frame_data)
+#         nparr = np.frombuffer(imgdata, np.uint8)
+#         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
-        # Process the frame
-        result = process_frame(frame, exercise_id, session_data)
+#         # Process the frame
+#         result = process_frame(frame, exercise_id, session_data)
         
-        # Send back the results
-        emit('exercise_frame', {
-            'left_counter': result.get('left_counter', 0),
-            'right_counter': result.get('right_counter', 0),
-            'feedback': result.get('feedback', ''),
-            'frame': result.get('frame', '')
-        })
+#         # Send back the results
+#         emit('exercise_frame', {
+#             'left_counter': result.get('left_counter', 0),
+#             'right_counter': result.get('right_counter', 0),
+#             'feedback': result.get('feedback', ''),
+#             'frame': result.get('frame', '')
+#         })
         
-    except Exception as e:
-        print(f"Error processing frame: {str(e)}")
-        traceback.print_exc()
-        emit('error', {'message': f'Error processing frame: {str(e)}'})
+#     except Exception as e:
+#         print(f"Error processing frame: {str(e)}")
+#         traceback.print_exc()
+#         emit('error', {'message': f'Error processing frame: {str(e)}'})
 
 def process_frame(frame, exercise_id, session_data):
     """

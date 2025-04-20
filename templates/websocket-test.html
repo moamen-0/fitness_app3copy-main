@@ -3,280 +3,417 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Fitness Trainer - WebSocket Test</title>
+    <title>AI Fitness WebSocket Test</title>
     <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
-            margin: 0;
+            max-width: 800px;
+            margin: 0 auto;
             padding: 20px;
         }
         .container {
-            max-width: 800px;
-            margin: 0 auto;
+            display: flex;
+            flex-wrap: wrap;
         }
         .video-container {
-            position: relative;
-            width: 100%;
-            max-width: 640px;
-            margin: 20px 0;
-            overflow: hidden;
-            background-color: #000;
+            flex: 1;
+            min-width: 320px;
+            margin-right: 20px;
         }
         #camera-feed {
             width: 100%;
-            height: auto;
-            display: block;
+            border: 1px solid #ccc;
+            background: #f0f0f0;
         }
         .controls {
-            margin: 20px 0;
+            flex: 1;
+            min-width: 320px;
+        }
+        #log-container {
+            height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-top: 20px;
+            background: #f9f9f9;
+            font-family: monospace;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        .error {
+            color: red;
+        }
+        .success {
+            color: green;
+        }
+        .button-group {
+            margin: 10px 0;
         }
         button {
-            padding: 10px 20px;
-            margin-right: 10px;
+            padding: 8px 12px;
+            margin-right: 5px;
             cursor: pointer;
         }
-        .counters {
-            display: flex;
-            justify-content: space-around;
-            margin: 20px 0;
+        #processed-image {
+            max-width: 100%;
+            margin-top: 10px;
+            border: 1px solid #ccc;
         }
-        .counter {
-            text-align: center;
-            font-size: 24px;
-        }
-        #feedback {
-            padding: 10px;
-            margin: 20px 0;
-            background-color: #f0f0f0;
-            border-radius: 5px;
-            font-size: 18px;
-            min-height: 30px;
+        .result-container {
+            margin-top: 20px;
         }
     </style>
 </head>
 <body>
+    <h1>AI Fitness WebSocket Test</h1>
+    
     <div class="container">
-        <h1>AI Fitness Trainer - WebSocket Test</h1>
-        
         <div class="video-container">
-            <video id="camera-feed" autoplay playsinline muted></video>
+            <h2>Camera Feed</h2>
+            <video id="camera-feed" width="320" height="240" autoplay playsinline></video>
+            <canvas id="canvas" style="display:none;"></canvas>
+            <div class="button-group">
+                <button id="start-camera">Start Camera</button>
+                <button id="stop-camera" disabled>Stop Camera</button>
+            </div>
         </div>
         
         <div class="controls">
-            <button id="start-btn" disabled>Start Exercise</button>
-            <button id="stop-btn" disabled>Stop Exercise</button>
-        </div>
-        
-        <div class="counters">
-            <div class="counter">
-                <div>Left:</div>
-                <div id="left-counter">0</div>
+            <h2>WebSocket Controls</h2>
+            <div class="button-group">
+                <button id="connect-socket">Connect Socket</button>
+                <button id="disconnect-socket" disabled>Disconnect Socket</button>
             </div>
-            <div class="counter">
-                <div>Right:</div>
-                <div id="right-counter">0</div>
+            
+            <div class="button-group">
+                <label for="exercise-select">Exercise Type:</label>
+                <select id="exercise-select">
+                    <option value="hummer">Bicep Curl (Hammer)</option>
+                    <option value="squat">Squat</option>
+                    <option value="shoulder_press">Shoulder Press</option>
+                    <option value="push_ups">Push Ups</option>
+                </select>
+            </div>
+            
+            <div class="button-group">
+                <button id="start-sending" disabled>Start Sending Frames</button>
+                <button id="stop-sending" disabled>Stop Sending Frames</button>
+            </div>
+            
+            <div class="button-group">
+                <button id="send-single-frame" disabled>Send Single Frame</button>
             </div>
         </div>
-        
-        <div id="feedback">Connecting to server...</div>
     </div>
     
+    <div class="result-container">
+        <h2>Results</h2>
+        <div>
+            <strong>Left Counter:</strong> <span id="left-counter">0</span> | 
+            <strong>Right Counter:</strong> <span id="right-counter">0</span> |
+            <strong>Feedback:</strong> <span id="feedback">None</span>
+        </div>
+        <h3>Processed Image</h3>
+        <img id="processed-image" src="" alt="No processed image yet">
+    </div>
+    
+    <h2>Log</h2>
+    <div id="log-container"></div>
+    
     <script>
-        // Configuration variables
-        const SERVER_URL = 'wss://ai-fitness-trainer2-115514733643.us-central1.run.app';
-        const FRAME_INTERVAL = 200; // Milliseconds between frames
-        const CAMERA_WIDTH = 640;
-        const CAMERA_HEIGHT = 480;
+        // DOM Elements
+        const cameraFeed = document.getElementById('camera-feed');
+        const canvas = document.getElementById('canvas');
+        const startCameraBtn = document.getElementById('start-camera');
+        const stopCameraBtn = document.getElementById('stop-camera');
+        const connectSocketBtn = document.getElementById('connect-socket');
+        const disconnectSocketBtn = document.getElementById('disconnect-socket');
+        const startSendingBtn = document.getElementById('start-sending');
+        const stopSendingBtn = document.getElementById('stop-sending');
+        const sendSingleFrameBtn = document.getElementById('send-single-frame');
+        const exerciseSelect = document.getElementById('exercise-select');
+        const logContainer = document.getElementById('log-container');
+        const leftCounterDisplay = document.getElementById('left-counter');
+        const rightCounterDisplay = document.getElementById('right-counter');
+        const feedbackDisplay = document.getElementById('feedback');
+        const processedImage = document.getElementById('processed-image');
         
-        // DOM elements
-        const videoElement = document.getElementById('camera-feed');
-        const canvas = document.createElement('canvas');
-        const canvasContext = canvas.getContext('2d');
-        const feedback = document.getElementById('feedback');
-        const leftCounter = document.getElementById('left-counter');
-        const rightCounter = document.getElementById('right-counter');
-        const startBtn = document.getElementById('start-btn');
-        const stopBtn = document.getElementById('stop-btn');
-        
-        // Set up canvas dimensions
-        canvas.width = CAMERA_WIDTH;
-        canvas.height = CAMERA_HEIGHT;
-        
-        // Socket.IO connection
-        let socket = null;
+        // State variables
         let mediaStream = null;
-        let frameInterval = null;
+        let socket = null;
+        let sendingInterval = null;
+        const frameRate = 5; // Frames per second to send
         
-        // Initialize socket connection
-        function initializeSocket() {
-            socket = io(SERVER_URL, {
-                transports: ['websocket'],
-                path: '/socket.io/'
-            });
-            
-            socket.on('connect', () => {
-                console.log('WebSocket connected');
-                feedback.textContent = 'Connected to server';
-                startBtn.disabled = false;
-            });
-            
-            socket.on('disconnect', () => {
-                console.log('WebSocket disconnected');
-                feedback.textContent = 'Disconnected from server';
-                startBtn.disabled = true;
-                stopBtn.disabled = true;
-                stopExerciseTracking();
-            });
-            
-            socket.on('error', (data) => {
-                console.error('WebSocket error:', data.message);
-                feedback.textContent = `Error: ${data.message}`;
-            });
-            
-            socket.on('exercise_frame', (data) => {
-                // Update counters
-                leftCounter.textContent = data.left_counter;
-                rightCounter.textContent = data.right_counter;
-                
-                // Update feedback if provided
-                if (data.feedback) {
-                    feedback.textContent = data.feedback;
-                }
-                
-                // Optionally display the processed frame if returned
-                if (data.frame) {
-                    videoElement.src = `data:image/jpeg;base64,${data.frame}`;
-                }
-            });
-            
-            socket.on('exercise_started', (data) => {
-                console.log('Exercise started:', data);
-                startBtn.disabled = true;
-                stopBtn.disabled = false;
-            });
-            
-            socket.on('exercise_stopped', () => {
-                console.log('Exercise stopped');
-                startBtn.disabled = false;
-                stopBtn.disabled = true;
-            });
+        // Helper function to add log entries
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `${new Date().toLocaleTimeString()} - ${message}`;
+            logContainer.appendChild(entry);
+            logContainer.scrollTop = logContainer.scrollHeight;
         }
         
-        // Set up camera
-        async function setupCamera() {
+        // Start camera
+        startCameraBtn.addEventListener('click', async () => {
             try {
-                if (mediaStream) {
-                    mediaStream.getTracks().forEach(track => track.stop());
-                }
-                
                 mediaStream = await navigator.mediaDevices.getUserMedia({
                     video: {
-                        width: { ideal: CAMERA_WIDTH },
-                        height: { ideal: CAMERA_HEIGHT },
-                        frameRate: { ideal: 15 }
-                    },
-                    audio: false
+                        width: { ideal: 320 },
+                        height: { ideal: 240 }
+                    }
                 });
+                cameraFeed.srcObject = mediaStream;
                 
-                videoElement.srcObject = mediaStream;
-                await videoElement.play();
-                
-                return true;
-            } catch (error) {
-                console.error('Error accessing camera:', error);
-                feedback.textContent = `Error accessing camera: ${error.message}`;
-                return false;
-            }
-        }
-        
-        // Start exercise tracking
-        async function startExerciseTracking() {
-            if (!socket || !socket.connected) {
-                feedback.textContent = 'Not connected to server';
-                return;
-            }
-            
-            feedback.textContent = 'Starting camera...';
-            
-            // Set up camera
-            const cameraReady = await setupCamera();
-            if (!cameraReady) return;
-            
-            // Tell server to start exercise
-            socket.emit('start_exercise', { 
-                exercise_id: 'hummer' // Change this to your exercise
-            });
-            
-            // Start sending frames
-            startSendingFrames();
-        }
-        
-        // Stop exercise tracking
-        function stopExerciseTracking() {
-            // Stop sending frames
-            if (frameInterval) {
-                clearInterval(frameInterval);
-                frameInterval = null;
-            }
-            
-            // Stop camera
-            if (mediaStream) {
-                mediaStream.getTracks().forEach(track => track.stop());
-                mediaStream = null;
-                videoElement.srcObject = null;
-            }
-            
-            // Tell server to stop exercise
-            if (socket && socket.connected) {
-                socket.emit('stop_exercise');
-            }
-            
-            // Reset UI
-            feedback.textContent = 'Exercise tracking stopped';
-        }
-        
-        // Start sending frames to server
-        function startSendingFrames() {
-            if (frameInterval) {
-                clearInterval(frameInterval);
-            }
-            
-            frameInterval = setInterval(() => {
-                if (socket && socket.connected && mediaStream) {
-                    // Draw current video frame to canvas
-                    canvasContext.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-                    
-                    // Convert to base64 JPEG
-                    const frameData = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
-                    
-                    // Send to server
-                    socket.emit('send_frame', { 
-                        frame: frameData
-                    });
+                startCameraBtn.disabled = true;
+                stopCameraBtn.disabled = false;
+                if (socket && socket.connected) {
+                    startSendingBtn.disabled = false;
+                    sendSingleFrameBtn.disabled = false;
                 }
-            }, FRAME_INTERVAL);
-        }
-        
-        // Event listeners
-        document.addEventListener('DOMContentLoaded', () => {
-            // Initialize Socket.IO connection
-            initializeSocket();
-            
-            // Setup buttons
-            startBtn.addEventListener('click', startExerciseTracking);
-            stopBtn.addEventListener('click', stopExerciseTracking);
-            
-            // Disable stop button initially
-            stopBtn.disabled = true;
+                
+                log('Camera started successfully', 'success');
+            } catch (error) {
+                log(`Error starting camera: ${error.message}`, 'error');
+            }
         });
         
-        // Clean up on page unload
-        window.addEventListener('beforeunload', () => {
-            stopExerciseTracking();
+        // Stop camera
+        stopCameraBtn.addEventListener('click', () => {
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                cameraFeed.srcObject = null;
+                mediaStream = null;
+                
+                startCameraBtn.disabled = false;
+                stopCameraBtn.disabled = true;
+                startSendingBtn.disabled = true;
+                stopSendingBtn.disabled = true;
+                sendSingleFrameBtn.disabled = true;
+                
+                // Stop sending frames if active
+                if (sendingInterval) {
+                    clearInterval(sendingInterval);
+                    sendingInterval = null;
+                }
+                
+                log('Camera stopped', 'info');
+            }
+        });
+        
+        // Connect WebSocket
+        connectSocketBtn.addEventListener('click', () => {
             if (socket) {
                 socket.disconnect();
             }
+            
+            // Get the current hostname from the browser
+            const hostname = window.location.hostname;
+            const port = window.location.port;
+            const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            
+            let socketUrl;
+            if (port) {
+                socketUrl = `${protocol}${hostname}:${port}`;
+            } else {
+                socketUrl = `${protocol}${hostname}`;
+            }
+            
+            log(`Connecting to Socket.IO at ${socketUrl}`);
+            
+            socket = io(socketUrl, {
+                transports: ['websocket'],
+                upgrade: false
+            });
+            
+            socket.on('connect', () => {
+                log('Socket.IO connected', 'success');
+                connectSocketBtn.disabled = true;
+                disconnectSocketBtn.disabled = false;
+                
+                if (mediaStream) {
+                    startSendingBtn.disabled = false;
+                    sendSingleFrameBtn.disabled = false;
+                }
+            });
+            
+            socket.on('disconnect', () => {
+                log('Socket.IO disconnected', 'info');
+                connectSocketBtn.disabled = false;
+                disconnectSocketBtn.disabled = true;
+                startSendingBtn.disabled = true;
+                stopSendingBtn.disabled = true;
+                sendSingleFrameBtn.disabled = true;
+                
+                if (sendingInterval) {
+                    clearInterval(sendingInterval);
+                    sendingInterval = null;
+                }
+            });
+            
+            socket.on('connect_error', (error) => {
+                log(`Socket.IO connection error: ${error.message}`, 'error');
+            });
+            
+            socket.on('error', (error) => {
+                log(`Socket.IO error: ${JSON.stringify(error)}`, 'error');
+            });
+            
+            // Handle responses from server
+            socket.on('process_result', (data) => {
+                if (data.error) {
+                    log(`Server error: ${data.error}`, 'error');
+                    return;
+                }
+                
+                // Update counters and feedback
+                leftCounterDisplay.textContent = data.left_counter || 0;
+                rightCounterDisplay.textContent = data.right_counter || 0;
+                feedbackDisplay.textContent = data.feedback || 'None';
+                
+                // Display processed image if available
+                if (data.annotated_image) {
+                    processedImage.src = `data:image/jpeg;base64,${data.annotated_image}`;
+                }
+                
+                log(`Received result: Left=${data.left_counter}, Right=${data.right_counter}`, 'success');
+            });
+            
+            // Response from exercise_frame event (if using that event)
+            socket.on('exercise_frame', (data) => {
+                if (data.error) {
+                    log(`Server error: ${data.error}`, 'error');
+                    return;
+                }
+                
+                // Update counters and feedback
+                leftCounterDisplay.textContent = data.left_counter || 0;
+                rightCounterDisplay.textContent = data.right_counter || 0;
+                feedbackDisplay.textContent = data.feedback || 'None';
+                
+                // Display frame if available
+                if (data.frame) {
+                    processedImage.src = `data:image/jpeg;base64,${data.frame}`;
+                }
+                
+                log(`Received frame: Left=${data.left_counter}, Right=${data.right_counter}`, 'success');
+            });
+            
+            // Additional event listeners for other server events
+            socket.on('connection_status', (data) => {
+                log(`Connection status: ${JSON.stringify(data)}`, 'info');
+            });
+            
+            socket.on('exercise_started', (data) => {
+                log(`Exercise started: ${JSON.stringify(data)}`, 'info');
+            });
+            
+            socket.on('exercise_stopped', () => {
+                log('Exercise stopped', 'info');
+            });
+        });
+        
+        // Disconnect WebSocket
+        disconnectSocketBtn.addEventListener('click', () => {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+                connectSocketBtn.disabled = false;
+                disconnectSocketBtn.disabled = true;
+                startSendingBtn.disabled = true;
+                stopSendingBtn.disabled = true;
+                sendSingleFrameBtn.disabled = true;
+                
+                if (sendingInterval) {
+                    clearInterval(sendingInterval);
+                    sendingInterval = null;
+                }
+                
+                log('Socket disconnected', 'info');
+            }
+        });
+        
+        // Function to capture and send a frame
+        function captureAndSendFrame() {
+            if (!mediaStream || !socket || !socket.connected) {
+                return;
+            }
+            
+            const ctx = canvas.getContext('2d');
+            canvas.width = cameraFeed.videoWidth;
+            canvas.height = cameraFeed.videoHeight;
+            ctx.drawImage(cameraFeed, 0, 0, canvas.width, canvas.height);
+            
+            // Get base64 encoded image data
+            const imageData = canvas.toDataURL('image/jpeg', 0.7);
+            
+            // Test both WebSocket endpoints for compatibility
+            
+            // Option 1: Use process_frame event
+            log(`Sending frame to process_frame (${imageData.length} bytes)`);
+            socket.emit('process_frame', {
+                exercise_type: exerciseSelect.value,
+                image: imageData
+            });
+            
+            // Option 2: Alternatively use send_frame event
+            /*
+            log(`Sending frame to send_frame (${imageData.length} bytes)`);
+            socket.emit('send_frame', {
+                frame: imageData.split(',')[1]
+            });
+            */
+        }
+        
+        // Start sending frames
+        startSendingBtn.addEventListener('click', () => {
+            if (sendingInterval) {
+                clearInterval(sendingInterval);
+            }
+            
+            log(`Starting to send frames at ${frameRate} FPS using exercise: ${exerciseSelect.value}`);
+            
+            // Option 1: Start session with start_exercise event
+            socket.emit('start_exercise', {
+                exercise_id: exerciseSelect.value
+            });
+            
+            // Option 2: Just start sending frames directly
+            sendingInterval = setInterval(captureAndSendFrame, 1000 / frameRate);
+            startSendingBtn.disabled = true;
+            stopSendingBtn.disabled = false;
+        });
+        
+        // Stop sending frames
+        stopSendingBtn.addEventListener('click', () => {
+            if (sendingInterval) {
+                clearInterval(sendingInterval);
+                sendingInterval = null;
+                
+                // Stop the exercise session if it was started
+                socket.emit('stop_exercise');
+                
+                startSendingBtn.disabled = false;
+                stopSendingBtn.disabled = true;
+                log('Stopped sending frames', 'info');
+            }
+        });
+        
+        // Send a single frame
+        sendSingleFrameBtn.addEventListener('click', () => {
+            log('Sending a single frame', 'info');
+            captureAndSendFrame();
+        });
+        
+        // Initialize the page
+        window.addEventListener('load', () => {
+            log('WebSocket test page loaded', 'info');
+            log('1. Start the camera', 'info');
+            log('2. Connect the WebSocket', 'info');
+            log('3. Select an exercise and start sending frames', 'info');
         });
     </script>
 </body>
