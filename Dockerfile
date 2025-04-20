@@ -12,7 +12,8 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
-
+RUN ls -la /app
+RUN cat /app/app.py | head -n 20
 # Set working directory
 WORKDIR /app
 
@@ -35,3 +36,4 @@ EXPOSE 8080
 
 # Use Gunicorn to run the app
 CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 app:app
+CMD exec gunicorn --worker-class eventlet --bind :$PORT --workers 1 --threads 8 --timeout 0 app:app
