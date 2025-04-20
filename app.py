@@ -5,7 +5,6 @@ import os
 import json
 import pygame
 import time
-import base64
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
@@ -13,7 +12,7 @@ import threading
 from flask_cors import CORS
 import base64
 import traceback
-import time
+import eventlet
 # Import exercise modules
 from utils import calculate_angle, mp_pose, pose
 from exercises.bicep_curl import hummer
@@ -26,6 +25,8 @@ from exercises.plank import plank
 from exercises.lateral_raise import side_lateral_raise
 from exercises.triceps_kickback import triceps_kickback_side
 from exercises.push_ups import push_ups
+
+eventlet.monkey_patch()
 
 app = Flask(__name__, static_folder='static')
 CORS(app)  # Enable CORS for all routes
