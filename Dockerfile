@@ -35,5 +35,4 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
 
 # Use Gunicorn to run the app
-CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 app:app
 CMD exec gunicorn --worker-class eventlet --bind :$PORT --workers 1 --threads 8 --timeout 0 app:app
