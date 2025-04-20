@@ -38,20 +38,7 @@ socketio = SocketIO(
     logger=True,
     engineio_logger=True
 )
-@app.route('/')
-def root():
-    routes_info = []
-    for rule in app.url_map.iter_rules():
-        routes_info.append({
-            "endpoint": rule.endpoint,
-            "methods": list(rule.methods),
-            "url": str(rule)
-        })
-    return jsonify({
-        "status": "AI Fitness Trainer API is running",
-        "registered_routes": len(routes_info),
-        "routes": routes_info
-    })
+
 # Setup for async processing
 executor = ThreadPoolExecutor(max_workers=4)
 
@@ -98,6 +85,21 @@ def get_valid_exercises():
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/api/routes')
+def api_routes():
+    routes_info = []
+    for rule in app.url_map.iter_rules():
+        routes_info.append({
+            "endpoint": rule.endpoint,
+            "methods": list(rule.methods),
+            "url": str(rule)
+        })
+    return jsonify({
+        "status": "AI Fitness Trainer API is running",
+        "registered_routes": len(routes_info),
+        "routes": routes_info
+    })
 
 @app.route('/static/<path:path>')
 def serve_static(path):
@@ -415,9 +417,6 @@ def process_exercise_frames(session_id, exercise_id, stop_event):
                                 right_state = 'up'
                                 right_counter += 1
                                 form_feedback = "ممتاز! استمر"
-                    
-                    # Implement exercise-specific logic based on exercise_id
-                    # Would need specific logic for each exercise
                 
                 # Display counters on frame
                 cv2.putText(image, f'Left: {left_counter}', (10, 50), 
@@ -487,14 +486,8 @@ def handle_frame(data):
         if not frame_data:
             emit('error', {'message': 'No frame data received'})
             return
-        emit('exercise_frame', {
-            'left_counter': result.get('left_counter', 0),
-            'right_counter': result.get('right_counter', 0),
-            'feedback': result.get('feedback', ''),
-            'frame': result.get('frame', '')  # Make sure this line is not commented out
-        })    
+            
         # Convert base64 to numpy array
-        import base64
         import numpy as np
         import cv2
         
@@ -510,8 +503,7 @@ def handle_frame(data):
             'left_counter': result.get('left_counter', 0),
             'right_counter': result.get('right_counter', 0),
             'feedback': result.get('feedback', ''),
-            # You can also send back the processed frame if needed
-            # 'frame': result.get('frame', '')
+            'frame': result.get('frame', '')
         })
         
     except Exception as e:
@@ -631,7 +623,7 @@ def process_frame(frame, exercise_id, session_data):
                                 form_feedback = "ممتاز! استمر"
                     
                     # Add other exercises based on your existing implementations
-                    elif exercise_id == 'dumbbell_front_raise':
+                    elif exercise_id == 'front_raise':
                         # Implement front raise logic
                         pass
                     elif exercise_id == 'squat':
@@ -671,7 +663,42 @@ def process_frame(frame, exercise_id, session_data):
             'feedback': f'Error: {str(e)}',
             'frame': ''
         }
+
+@socketio.on('process_frame')
+def handle_process_frame(data):
+    """
+    WebSocket handler for processing frames in real-time.
+    Accepts base64-encoded image frames and returns processing results.
+    """
+    try:
+        # Extract exercise type and image data
+        exercise_type = data.get('exercise_type', 'hummer')
+        img_data = data.get('image')
         
+        if not img_data:
+            emit('process_result', {"error": "No image data provided"})
+            return
+            
+        # Decode base64 image
+        img_bytes = base64.b64decode(img_data.split(',')[1] if ',' in img_data else img_data)
+        nparr = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if frame is None or frame.size == 0:
+            emit('process_result', {"error": "Invalid image format"})
+            return
+        
+        # Process the frame
+        results = process_single_frame(frame, exercise_type)
+        
+        # Send results back
+        emit('process_result', results)
+        
+    except Exception as e:
+        app.logger.error(f"WebSocket error: {str(e)}")
+        app.logger.error(traceback.format_exc())
+        emit('process_result', {"error": str(e)})
+
 @app.route('/api/exercise/start/<exercise>', methods=['POST'])
 def start_exercise_api(exercise):
     """
