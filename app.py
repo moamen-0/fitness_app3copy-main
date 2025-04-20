@@ -655,8 +655,15 @@ from exercises.push_ups import push_ups
 
 app = Flask(__name__, static_folder='static')
 CORS(app)  # Enable CORS for all routes
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
-
+socketio = SocketIO(
+    app, 
+    cors_allowed_origins="*",  # For testing
+    async_mode='eventlet',  # Important for WebSockets
+    ping_timeout=60,
+    ping_interval=25,
+    logger=True,
+    engineio_logger=True
+)
 # Setup for async processing
 executor = ThreadPoolExecutor(max_workers=4)
 
@@ -1073,6 +1080,204 @@ def process_exercise_frames(session_id, exercise_id, stop_event):
             if 'cap' in session_data and session_data['cap'] is not None:
                 session_data['cap'].release()
 
+@socketio.on('send_frame')
+def handle_frame(data):
+    """
+    Process frames sent from client and return real-time feedback
+    """
+    if request.sid not in active_sessions:
+        emit('error', {'message': 'No active session'})
+        return
+        
+    try:
+        session_data = active_sessions[request.sid]
+        exercise_id = session_data.get('exercise_id')
+        
+        # Decode base64 frame
+        frame_data = data.get('frame')
+        if not frame_data:
+            emit('error', {'message': 'No frame data received'})
+            return
+            
+        # Convert base64 to numpy array
+        import base64
+        import numpy as np
+        import cv2
+        
+        imgdata = base64.b64decode(frame_data)
+        nparr = np.frombuffer(imgdata, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        # Process the frame
+        result = process_frame(frame, exercise_id, session_data)
+        
+        # Send back the results
+        emit('exercise_frame', {
+            'left_counter': result.get('left_counter', 0),
+            'right_counter': result.get('right_counter', 0),
+            'feedback': result.get('feedback', ''),
+            # You can also send back the processed frame if needed
+            # 'frame': result.get('frame', '')
+        })
+        
+    except Exception as e:
+        print(f"Error processing frame: {str(e)}")
+        traceback.print_exc()
+        emit('error', {'message': f'Error processing frame: {str(e)}'})
+
+def process_frame(frame, exercise_id, session_data):
+    """
+    Process a single frame for exercise tracking
+    This function integrates with your existing exercise tracking code
+    
+    Args:
+        frame: The video frame as numpy array
+        exercise_id: ID of the exercise being performed
+        session_data: Active session data containing counters and state
+    
+    Returns:
+        Dictionary with tracking results
+    """
+    try:
+        # Flip the frame horizontally for better user experience
+        frame = cv2.flip(frame, 1)
+        
+        # Convert to RGB for mediapipe
+        image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = pose.process(image)
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        
+        # Get current counter values from session
+        left_counter = session_data.get('left_counter', 0)
+        right_counter = session_data.get('right_counter', 0)
+        left_state = session_data.get('left_state')
+        right_state = session_data.get('right_state')
+        
+        # Default feedback
+        form_feedback = ""
+        
+        if results and results.pose_landmarks:
+            landmarks = results.pose_landmarks.landmark
+            
+            # Draw the pose landmarks
+            mp_drawing.draw_landmarks(
+                image, 
+                results.pose_landmarks, 
+                mp_pose.POSE_CONNECTIONS,
+                mp_drawing.DrawingSpec(color=(245, 117, 66), thickness=2, circle_radius=4),
+                mp_drawing.DrawingSpec(color=(245, 66, 230), thickness=2, circle_radius=2)
+            )
+            
+            # Define arm landmarks for exercise tracking
+            arm_sides = {
+                'left': {
+                    'shoulder': mp_pose.PoseLandmark.LEFT_SHOULDER,
+                    'elbow': mp_pose.PoseLandmark.LEFT_ELBOW,
+                    'wrist': mp_pose.PoseLandmark.LEFT_WRIST
+                },
+                'right': {
+                    'shoulder': mp_pose.PoseLandmark.RIGHT_SHOULDER,
+                    'elbow': mp_pose.PoseLandmark.RIGHT_ELBOW,
+                    'wrist': mp_pose.PoseLandmark.RIGHT_WRIST
+                }
+            }
+            
+            # Process both arms
+            for side, joints in arm_sides.items():
+                # Check if landmarks exist
+                if (landmarks[joints['shoulder'].value].visibility > 0.5 and
+                    landmarks[joints['elbow'].value].visibility > 0.5 and
+                    landmarks[joints['wrist'].value].visibility > 0.5):
+                    
+                    # Extract coordinates
+                    shoulder = [
+                        landmarks[joints['shoulder'].value].x,
+                        landmarks[joints['shoulder'].value].y,
+                    ]
+                    elbow = [
+                        landmarks[joints['elbow'].value].x,
+                        landmarks[joints['elbow'].value].y,
+                    ]
+                    wrist = [
+                        landmarks[joints['wrist'].value].x,
+                        landmarks[joints['wrist'].value].y,
+                    ]
+                    
+                    # Calculate elbow angle
+                    elbow_angle = calculate_angle(shoulder, elbow, wrist)
+                    
+                    # Display angle on frame
+                    cv2.putText(
+                        image,
+                        f'{int(elbow_angle)}',
+                        tuple(np.multiply(elbow, [image.shape[1], image.shape[0]]).astype(int)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 255, 255),
+                        2,
+                        cv2.LINE_AA
+                    )
+                    
+                    # Exercise specific logic based on exercise_id
+                    if exercise_id == 'hummer':
+                        if side == 'left':
+                            if elbow_angle > 160:
+                                left_state = 'down'
+                            if elbow_angle < 30 and left_state == 'down':
+                                left_state = 'up'
+                                left_counter += 1
+                                form_feedback = "جيد! استمر"
+                        
+                        if side == 'right':
+                            if elbow_angle > 160:
+                                right_state = 'down'
+                            if elbow_angle < 30 and right_state == 'down':
+                                right_state = 'up'
+                                right_counter += 1
+                                form_feedback = "ممتاز! استمر"
+                    
+                    # Add other exercises based on your existing implementations
+                    elif exercise_id == 'dumbbell_front_raise':
+                        # Implement front raise logic
+                        pass
+                    elif exercise_id == 'squat':
+                        # Implement squat logic
+                        pass
+                    # Add more exercises as needed
+        
+        # Update session data
+        session_data['left_counter'] = left_counter
+        session_data['right_counter'] = right_counter
+        session_data['left_state'] = left_state
+        session_data['right_state'] = right_state
+        
+        # Display counters on frame
+        cv2.putText(image, f'Left: {left_counter}', (10, 50), 
+                 cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+        cv2.putText(image, f'Right: {right_counter}', (10, 100), 
+                 cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+        
+        # Convert processed frame to base64 if needed
+        ret, buffer = cv2.imencode('.jpg', image, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+        processed_frame = base64.b64encode(buffer).decode('utf-8')
+        
+        return {
+            'left_counter': left_counter,
+            'right_counter': right_counter,
+            'feedback': form_feedback,
+            'frame': processed_frame  # Return the processed frame
+        }
+        
+    except Exception as e:
+        print(f"Error in process_frame: {str(e)}")
+        traceback.print_exc()
+        return {
+            'left_counter': session_data.get('left_counter', 0),
+            'right_counter': session_data.get('right_counter', 0),
+            'feedback': f'Error: {str(e)}',
+            'frame': ''
+        }
+        
 @app.route('/api/exercise/start/<exercise>', methods=['POST'])
 def start_exercise_api(exercise):
     """

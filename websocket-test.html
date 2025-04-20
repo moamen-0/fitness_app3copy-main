@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Fitness Trainer - WebSocket Test</title>
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: 20px 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+        #camera-feed {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin-right: 10px;
+            cursor: pointer;
+        }
+        .counters {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+        }
+        .counter {
+            text-align: center;
+            font-size: 24px;
+        }
+        #feedback {
+            padding: 10px;
+            margin: 20px 0;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            font-size: 18px;
+            min-height: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI Fitness Trainer - WebSocket Test</h1>
+        
+        <div class="video-container">
+            <video id="camera-feed" autoplay playsinline muted></video>
+        </div>
+        
+        <div class="controls">
+            <button id="start-btn" disabled>Start Exercise</button>
+            <button id="stop-btn" disabled>Stop Exercise</button>
+        </div>
+        
+        <div class="counters">
+            <div class="counter">
+                <div>Left:</div>
+                <div id="left-counter">0</div>
+            </div>
+            <div class="counter">
+                <div>Right:</div>
+                <div id="right-counter">0</div>
+            </div>
+        </div>
+        
+        <div id="feedback">Connecting to server...</div>
+    </div>
+    
+    <script>
+        // Configuration variables
+        const SERVER_URL = 'wss://ai-fitness-trainer2-115514733643.us-central1.run.app';
+        const FRAME_INTERVAL = 200; // Milliseconds between frames
+        const CAMERA_WIDTH = 640;
+        const CAMERA_HEIGHT = 480;
+        
+        // DOM elements
+        const videoElement = document.getElementById('camera-feed');
+        const canvas = document.createElement('canvas');
+        const canvasContext = canvas.getContext('2d');
+        const feedback = document.getElementById('feedback');
+        const leftCounter = document.getElementById('left-counter');
+        const rightCounter = document.getElementById('right-counter');
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        
+        // Set up canvas dimensions
+        canvas.width = CAMERA_WIDTH;
+        canvas.height = CAMERA_HEIGHT;
+        
+        // Socket.IO connection
+        let socket = null;
+        let mediaStream = null;
+        let frameInterval = null;
+        
+        // Initialize socket connection
+        function initializeSocket() {
+            socket = io(SERVER_URL, {
+                transports: ['websocket'],
+                path: '/socket.io/'
+            });
+            
+            socket.on('connect', () => {
+                console.log('WebSocket connected');
+                feedback.textContent = 'Connected to server';
+                startBtn.disabled = false;
+            });
+            
+            socket.on('disconnect', () => {
+                console.log('WebSocket disconnected');
+                feedback.textContent = 'Disconnected from server';
+                startBtn.disabled = true;
+                stopBtn.disabled = true;
+                stopExerciseTracking();
+            });
+            
+            socket.on('error', (data) => {
+                console.error('WebSocket error:', data.message);
+                feedback.textContent = `Error: ${data.message}`;
+            });
+            
+            socket.on('exercise_frame', (data) => {
+                // Update counters
+                leftCounter.textContent = data.left_counter;
+                rightCounter.textContent = data.right_counter;
+                
+                // Update feedback if provided
+                if (data.feedback) {
+                    feedback.textContent = data.feedback;
+                }
+                
+                // Optionally display the processed frame if returned
+                if (data.frame) {
+                    videoElement.src = `data:image/jpeg;base64,${data.frame}`;
+                }
+            });
+            
+            socket.on('exercise_started', (data) => {
+                console.log('Exercise started:', data);
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+            });
+            
+            socket.on('exercise_stopped', () => {
+                console.log('Exercise stopped');
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            });
+        }
+        
+        // Set up camera
+        async function setupCamera() {
+            try {
+                if (mediaStream) {
+                    mediaStream.getTracks().forEach(track => track.stop());
+                }
+                
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: CAMERA_WIDTH },
+                        height: { ideal: CAMERA_HEIGHT },
+                        frameRate: { ideal: 15 }
+                    },
+                    audio: false
+                });
+                
+                videoElement.srcObject = mediaStream;
+                await videoElement.play();
+                
+                return true;
+            } catch (error) {
+                console.error('Error accessing camera:', error);
+                feedback.textContent = `Error accessing camera: ${error.message}`;
+                return false;
+            }
+        }
+        
+        // Start exercise tracking
+        async function startExerciseTracking() {
+            if (!socket || !socket.connected) {
+                feedback.textContent = 'Not connected to server';
+                return;
+            }
+            
+            feedback.textContent = 'Starting camera...';
+            
+            // Set up camera
+            const cameraReady = await setupCamera();
+            if (!cameraReady) return;
+            
+            // Tell server to start exercise
+            socket.emit('start_exercise', { 
+                exercise_id: 'hummer' // Change this to your exercise
+            });
+            
+            // Start sending frames
+            startSendingFrames();
+        }
+        
+        // Stop exercise tracking
+        function stopExerciseTracking() {
+            // Stop sending frames
+            if (frameInterval) {
+                clearInterval(frameInterval);
+                frameInterval = null;
+            }
+            
+            // Stop camera
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+                videoElement.srcObject = null;
+            }
+            
+            // Tell server to stop exercise
+            if (socket && socket.connected) {
+                socket.emit('stop_exercise');
+            }
+            
+            // Reset UI
+            feedback.textContent = 'Exercise tracking stopped';
+        }
+        
+        // Start sending frames to server
+        function startSendingFrames() {
+            if (frameInterval) {
+                clearInterval(frameInterval);
+            }
+            
+            frameInterval = setInterval(() => {
+                if (socket && socket.connected && mediaStream) {
+                    // Draw current video frame to canvas
+                    canvasContext.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+                    
+                    // Convert to base64 JPEG
+                    const frameData = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+                    
+                    // Send to server
+                    socket.emit('send_frame', { 
+                        frame: frameData
+                    });
+                }
+            }, FRAME_INTERVAL);
+        }
+        
+        // Event listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initialize Socket.IO connection
+            initializeSocket();
+            
+            // Setup buttons
+            startBtn.addEventListener('click', startExerciseTracking);
+            stopBtn.addEventListener('click', stopExerciseTracking);
+            
+            // Disable stop button initially
+            stopBtn.disabled = true;
+        });
+        
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            stopExerciseTracking();
+            if (socket) {
+                socket.disconnect();
+            }
+        });
+    </script>
+</body>
+</html>
