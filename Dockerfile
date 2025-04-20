@@ -12,8 +12,6 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
-RUN ls -la /app
-RUN cat /app/app.py | head -n 20
 # Set working directory
 WORKDIR /app
 
