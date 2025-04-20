@@ -1675,6 +1675,9 @@ def health_check():
 @app.route('/socket-test')
 def socket_test():
     return render_template('websocket-test.html')
+@app.route('/test')
+def test():
+    return "Hello, the app is working!"
 # Simplified lightweight endpoint for mobile clients
 @app.route('/api/exercise_simple/<exercise>', methods=['GET'])
 def simple_exercise_stream(exercise):
