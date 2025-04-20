@@ -1672,7 +1672,9 @@ def health_check():
         "active_sessions": active_count,
         "memory_usage_mb": memory_usage
     })
-
+@app.route('/socket-test')
+def socket_test():
+    return render_template('websocket-test.html')
 # Simplified lightweight endpoint for mobile clients
 @app.route('/api/exercise_simple/<exercise>', methods=['GET'])
 def simple_exercise_stream(exercise):
